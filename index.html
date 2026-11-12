@@ -293,6 +293,9 @@ textarea:focus { border-color: var(--accent); outline: none; box-shadow: 0 0 0 2
   * { transition: none !important; animation: none !important; }
 }
 .chip small { margin-left: 6px; opacity: 0.7; font-weight: 400; }
+.chip.zero:not([aria-pressed="true"]) { opacity: 0.45; }
+.fcount { display: flex; flex-wrap: wrap; gap: 10px 16px; align-items: center; justify-content: space-between; border-top: 1px solid var(--line); padding-top: 14px; }
+.fcount b { font-family: var(--font-display); color: var(--accent); font-size: 1.15em; }
 /* ===== Examen: solo las diapositivas del examen ===== */
 .ex-chips { display: flex; flex-wrap: wrap; gap: 6px; }
 .ex-sl { border: 1px solid var(--accent); background: var(--accent-soft); color: var(--accent); border-radius: 999px; padding: 2px 11px; font-weight: 700; font-size: 0.78rem; min-height: 28px; }
@@ -409,6 +412,9 @@ textarea:focus { border-color: var(--accent); outline: none; box-shadow: 0 0 0 2
 .pr-blk.hc0 { border-left: 6px solid #2b6cb0; }
 .pr-blk.hc1 { border-left: 6px solid #b7791f; }
 .pr-blk.hc2 { border-left: 6px solid #2f855a; }
+.pr-blk.hc3 { border-left: 6px solid #c53030; }
+.pr-blk.hc4 { border-left: 6px solid #6b46c1; }
+.pr-blk.hc5 { border-left: 6px solid #0987a0; }
 .pr-ghost { position: fixed; z-index: 100; pointer-events: none; opacity: 0.92; box-shadow: 0 8px 20px rgba(0,0,0,.3); cursor: grabbing; }
 
 @media (max-width: 560px) {
@@ -1107,6 +1113,39 @@ function plain(a) {
   var SKIP = [27, 29, 31, 56], NSL = 66;
   var BSTART = [3, 9, 12, 17, 24, 46, 57];
   var QSL = [3, 4, 5, 7, 6, 8, 5, 9, 10, 11, 10, 12, 12, 13, 14, 16, 14, 21, 17, 18, 18, 19, 20, 19, 24, 26, 32, 33, 36, 37, 39, 42, 43, 44, 47, 48, 51, 52, 53, 54, 55, 57, 58, 59, 60, 61, 62, 67, 69, 64];
+  /* Diapositivas que entran al examen (mismas de la pestaña Examen) */
+  var EXAM_QIDS = [3, 6, 7, 15, 17, 18, 22, 23, 24, 26, 29, 30, 31, 32, 33, 34, 37, 40, 49];   /* preguntas que cubren las diapositivas de la pestaña Examen */
+  function isEx(q) { return EXAM_QIDS.indexOf(q.id) > -1; }
+  var SIM_TYPES = ['def', 'lista', 'contraste', 'aplicar'], SIM_PROBS = ['alta', 'media', 'baja'];
+  function simf() {
+    var f = Object.assign({ src: 'all', blocks: BLOCKS.map(function (b) { return b.id; }), types: SIM_TYPES.slice(), probs: SIM_PROBS.slice(), rev: 'all', samp: 'random' }, S.prefs.simf || {});
+    ['blocks', 'types', 'probs'].forEach(function (k) { if (!Array.isArray(f[k]) || !f[k].length) f[k] = simfAll(k); });
+    return f;
+  }
+  function simfDefault() { return { src: 'all', blocks: simfAll('blocks'), types: simfAll('types'), probs: simfAll('probs'), rev: 'all', samp: f_samp() }; }
+  function f_samp() { return (S.prefs.simf && S.prefs.simf.samp) || 'random'; }
+  function simfAll(k) { return k === 'blocks' ? BLOCKS.map(function (b) { return b.id; }) : k === 'types' ? SIM_TYPES.slice() : SIM_PROBS.slice(); }
+  function simMatch(q, f, skip) {
+    if (skip !== 'src') { var e = isEx(q); if (f.src === 'exam' && !e) return false; if (f.src === 'noexam' && e) return false; }
+    if (skip !== 'blocks' && f.blocks.indexOf(q.b) < 0) return false;
+    if (skip !== 'types' && f.types.indexOf(q.t) < 0) return false;
+    if (skip !== 'probs' && f.probs.indexOf(q.p) < 0) return false;
+    if (skip !== 'rev') {
+      var h = S.hist[q.id];
+      if (f.rev === 'err' && !(h && h.last < 0.8)) return false;
+      if (f.rev === 'new' && h && h.n) return false;
+    }
+    return true;
+  }
+  function simPool(f, skip) { f = f || simf(); return BANK.filter(function (q) { return simMatch(q, f, skip); }); }
+  function setSimf(k, v) { var f = simf(); f[k] = v; S.prefs.simf = f; save(); render(); }
+  function toggleSimf(k, v) {
+    var f = simf(), all = simfAll(k), a = f[k].slice(), i = a.indexOf(v);
+    if (a.length === all.length) a = [v];          /* todo activo: tocar uno = elegir solo ese */
+    else if (i > -1) { a.splice(i, 1); if (!a.length) a = all; }
+    else a.push(v);
+    setSimf(k, a);
+  }
   function vs(p) { return p - SKIP.filter(function (x) { return x < p; }).length; }
   function pad2(n) { return n < 10 ? '0' + n : String(n); }
   function slideBtn(q) {
@@ -1363,18 +1402,44 @@ function plain(a) {
     return vSimReview();
   }
   function vSimSetup() {
-    var p = S.prefs, st = ui.setup, n = Math.min(st.n, BANK.length);
-    if (!st.minTouched) st.min = { 10: 60, 15: 90, 20: 120 }[st.n] || 60;
-    var mins = [20, 30, 45, 60, 75, 90, 120].map(function (m) { return '<option value="' + m + '"' + (m === st.min ? ' selected' : '') + '>' + m + ' min' + (m === 60 ? ' (examen real)' : '') + '</option>'; }).join('');
-    return '<div class="vh"><h2>Simulacro de examen</h2><p>Preguntas al azar de todos los bloques. El examen real: 10 preguntas, 1 hora.</p></div>' +
+    var p = S.prefs, st = ui.setup, f = simf(), pl = simPool(f), avail = pl.length;
+    var want = st.n === 'all' ? avail : st.n, n = Math.min(want, avail);
+    if (!st.minTouched) st.min = Math.max(5, n * 6);
+    var mv = [20, 30, 45, 60, 75, 90, 120]; if (mv.indexOf(st.min) < 0) { mv.push(st.min); mv.sort(function (a, b) { return a - b; }); }
+    var mins = mv.map(function (m) { return '<option value="' + m + '"' + (m === st.min ? ' selected' : '') + '>' + m + ' min' + (m === 60 ? ' (examen real)' : '') + '</option>'; }).join('');
+    /* chips multiselección: el conteo de cada opción respeta los OTROS filtros */
+    function multi(action, key, opts) {
+      var all = f[key].length === simfAll(key).length;
+      return '<div class="chips" style="display:flex;flex-wrap:wrap;gap:6px"><button class="chip" data-a="sim-all" data-k="' + key + '" aria-pressed="' + all + '">Todos</button>' + opts.map(function (o) {
+        var c = BANK.filter(function (q) { return simMatch(q, f, key) && q[{ blocks: 'b', types: 't', probs: 'p' }[key]] === o[0]; }).length;
+        return '<button class="chip' + (c ? '' : ' zero') + '" data-a="' + action + '" data-v="' + o[0] + '" aria-pressed="' + (!all && f[key].indexOf(o[0]) > -1) + '">' + o[1] + '<small>' + c + '</small></button>';
+      }).join('') + '</div>';
+    }
+    function segC(action, cur, opts, fn) {
+      return seg(action, cur, opts.map(function (o) { return [o[0], o[1] + ' (' + fn(o[0]) + ')']; }));
+    }
+    var srcCount = function (v) { return BANK.filter(function (q) { return simMatch(q, f, 'src') && (v === 'all' || (v === 'exam') === isEx(q)); }).length; };
+    var revCount = function (v) { return BANK.filter(function (q) { var h = S.hist[q.id]; return simMatch(q, f, 'rev') && (v === 'all' || (v === 'err' ? !!(h && h.last < 0.8) : !(h && h.n))); }).length; };
+    var def = JSON.stringify(f) === JSON.stringify(simfDefault());
+    return '<div class="vh"><h2>Simulacro de examen</h2><p>Arma tu simulacro: elige de dónde salen las preguntas. El examen real: 10 preguntas, 1 hora.</p></div>' +
+      '<div class="panel"><div class="field"><span class="lbl">Origen</span>' + segC('sim-src', f.src, [['all', 'Todo el banco'], ['exam', 'Solo lo del examen'], ['noexam', 'Lo que no es del examen']], srcCount) +
+      '<span class="hint">«Del examen» = las preguntas que cubren los temas de la pestaña Examen.</span></div>' +
+      '<div class="field"><span class="lbl">Bloques</span>' + multi('sim-blk', 'blocks', BLOCKS.map(function (b) { return [b.id, b.id + '. ' + esc(b.n)]; })) +
+      '<span class="hint">Toca uno para quedarte solo con ese; toca más para sumarlos o quitarlos.</span></div>' +
+      '<div class="field"><span class="lbl">Tipo de pregunta</span>' + multi('sim-type', 'types', SIM_TYPES.map(function (t) { return [t, TYPES[t]]; })) + '</div>' +
+      '<div class="field"><span class="lbl">Probabilidad de salir</span>' + multi('sim-prob', 'probs', [['alta', 'Alta'], ['media', 'Media'], ['baja', 'Baja']]) + '</div>' +
+      '<div class="setup"><div class="field"><span class="lbl">Tu historial</span>' + segC('sim-rev', f.rev, [['all', 'Todas'], ['err', 'Mis errores'], ['new', 'Sin practicar']], revCount) + '</div>' +
+      '<div class="field"><span class="lbl">Cómo elegirlas</span>' + seg('sim-samp', f.samp, [['random', 'Al azar'], ['weighted', 'Más probables primero']]) + '<span class="hint">' + (f.samp === 'weighted' ? 'Las de probabilidad alta salen más seguido.' : 'Todas tienen la misma opción de salir.') + '</span></div></div>' +
+      '<div class="fcount"><span>Con estos filtros hay <b>' + avail + '</b> pregunta' + (avail === 1 ? '' : 's') + (avail && want > avail ? ' (pediste ' + want + ': se usarán ' + avail + ')' : '') + '.</span>' +
+      (def ? '' : '<button class="btn ghost sm" data-a="sim-reset">Quitar filtros</button>') + '</div></div>' +
       '<div class="panel"><div class="setup">' +
-      '<div class="field"><span class="lbl">Preguntas</span>' + seg('sim-n', st.n, [[10, '10 (real)'], [15, '15'], [20, '20']]) + '<span class="hint">Del banco de ' + BANK.length + '.</span></div>' +
+      '<div class="field"><span class="lbl">Preguntas</span>' + seg('sim-n', st.n, [[5, '5'], [10, '10 (real)'], [15, '15'], [20, '20'], ['all', 'Todas (' + avail + ')']]) + '<span class="hint">De las ' + avail + ' que cumplen tus filtros.</span></div>' +
       '<div class="field"><label class="lbl" for="sel-min">Tiempo</label><select id="sel-min" data-ch="sim-min">' + mins + '</select></div>' +
       '<div class="field"><span class="lbl">Respuesta</span>' + seg('sim-mode', p.mode, [['paper', 'En papel'], ['kb', 'En teclado']]) + '<span class="hint">' + (p.mode === 'paper' ? 'Escribes a mano y al final te autoevalúas.' : 'Escribes aquí y se detectan palabras clave.') + '</span></div>' +
       '<div class="field"><span class="lbl">Pitidos distractores</span><label class="check"><input type="checkbox" id="chk-beep" data-ch="sim-beep"' + (p.beep ? ' checked' : '') + '> Activar pitidos</label>' +
       '<div class="row"><label class="hint" for="rng-vol">Volumen</label><input type="range" id="rng-vol" min="5" max="80" value="' + Math.round(p.vol * 100) + '" data-in="vol"></div>' +
       '<div class="row"><span class="hint">Uno cada 3 segundos.</span><button class="btn ghost sm" data-a="sim-test">Probar sonido</button></div></div>' +
-      '</div><div class="row"><button class="btn pri" data-a="sim-start">Comenzar con ' + n + ' preguntas</button></div></div>';
+      '</div><div class="row"><button class="btn pri" data-a="sim-start"' + (n ? '' : ' disabled') + '>' + (n ? 'Comenzar con ' + n + ' pregunta' + (n === 1 ? '' : 's') : 'No hay preguntas con esos filtros') + '</button></div></div>';
   }
   function ebar(s) {
     var late = s.rem < 10 * 60000;
@@ -1405,7 +1470,10 @@ function plain(a) {
     var total = ui.setup.min * 60000;
     if (qs && qs.length && ui.simRetry) total = qs.length * 6 * 60000;
     if (!qs) {
-      qs = shuffle(BANK).slice(0, Math.min(ui.setup.n, BANK.length));
+      var f = simf(), pl = simPool(f);
+      if (!pl.length) { toast('No hay preguntas con esos filtros.'); return; }
+      var want = ui.setup.n === 'all' ? pl.length : ui.setup.n, n = Math.min(want, pl.length);
+      qs = f.samp === 'weighted' ? pickQs(pl, n, true) : shuffle(pl).slice(0, n);
     }
     ui.sim = { kind: 'sim', phase: 'run', qs: qs, mode: S.prefs.mode, total: total, rem: total, endAt: Date.now() + total, paused: false, answers: {}, marks: {}, counted: {}, confirm: false, beepOn: !!S.prefs.beep };
     ui.simRetry = false;
@@ -1701,7 +1769,15 @@ function plain(a) {
       S.hist = {}; S.box = {}; save(); ui.confirmReset = false; render(); toast('Avance borrado.');
     },
     /* simulacro */
-    'sim-n': function (el) { ui.setup.n = +el.dataset.v; render(); },
+    'sim-n': function (el) { ui.setup.n = el.dataset.v === 'all' ? 'all' : +el.dataset.v; render(); },
+    'sim-src': function (el) { setSimf('src', el.dataset.v); },
+    'sim-rev': function (el) { setSimf('rev', el.dataset.v); },
+    'sim-samp': function (el) { setSimf('samp', el.dataset.v); },
+    'sim-blk': function (el) { toggleSimf('blocks', +el.dataset.v); },
+    'sim-type': function (el) { toggleSimf('types', el.dataset.v); },
+    'sim-prob': function (el) { toggleSimf('probs', el.dataset.v); },
+    'sim-all': function (el) { setSimf(el.dataset.k, simfAll(el.dataset.k)); },
+    'sim-reset': function () { var f = simf(); S.prefs.simf = { src: 'all', blocks: simfAll('blocks'), types: simfAll('types'), probs: simfAll('probs'), rev: 'all', samp: f.samp }; save(); render(); },
     'sim-mode': function (el) { S.prefs.mode = el.dataset.v; save(); render(); },
     'sim-test': function () { Beep.test(); },
     'sim-start': function () { ui.simRetry = false; simStart(); },
@@ -1938,6 +2014,75 @@ function plain(a) {
         I('Evaluar resultados', 'Revisar si los empleados aprendieron y mejoraron su trabajo.', ['revisar', 'aprendieron', 'mejoraron su trabajo'], 68)
       ] }
   ];
+  /* ---------- Todo el temario: contenido generado desde el banco ---------- */
+  var EXAM_GB = { teorias: 1, dimensiones: 1, recomendaciones: 3, conclusion: 3, negociacion: 4, importancia: 5, tipos: 5, metodos: 5, carrera: 6, evaluacion: 6, programa: 7 };
+  function exPosOfBadge(b) { for (var i = 0; i < EXSL.length; i++) if (EXSL[i][0] === b) return EXSL[i][1]; return 0; }
+  var EXG_EXAM = EXG.slice(), EXG_FULL = [];
+  EXG_EXAM.forEach(function (g) { g.b = EXAM_GB[g.id] || 1; g.ord = exPosOfBadge(g.sl[0]); });
+  function bkPlain(t) { return String(t).replace(/\*\*/g, '').replace(/\s+/g, ' ').trim(); }
+  function bkBold(t) {
+    var out = [];
+    (String(t).match(/\*\*(.+?)\*\*/g) || []).forEach(function (x) { x = x.slice(2, -2).replace(/[\s:.;,]+$/, '').trim(); if (x.length > 1 && out.indexOf(x) < 0) out.push(x); });
+    return out;
+  }
+  function bkChunks(d) {
+    var c = d.split(/\s*[,;]\s*|\s+y\s+/).filter(function (x) { return x.length >= 6; }).slice(0, 4);
+    return c.length ? c : [d];
+  }
+  function bkShort(x) { var w = x.split(' '); return w.length > 3 ? w.slice(0, 3).join(' ') : x; }
+  function bkCz(d, k) {
+    var low = d.toLowerCase(), out = [];
+    k.forEach(function (x) { x = x.length <= 32 && x.split(' ').length <= 4 ? x : bkShort(x); if (low.indexOf(x.toLowerCase()) > -1 && out.indexOf(x) < 0) out.push(x); });
+    if (!out.length) (d.match(/[A-Za-zÁÉÍÓÚÜÑáéíóúüñ]{7,}/g) || []).filter(function (w, i, a) { return a.indexOf(w) === i; }).sort(function (a, b) { return b.length - a.length; }).slice(0, 2).forEach(function (w) { out.push(w); });
+    return out.slice(0, 6);
+  }
+  function bkItem(n, raw) {
+    var d = bkPlain(raw), k = bkBold(raw), bold = k.length > 0;
+    if (!bold) k = bkChunks(d);
+    return { n: n, d: d, k: k, s: null, cz: bkCz(d, bold ? k : []), note: '' };
+  }
+  function bkGroup(q) {
+    var lines = q.a.split('\n').map(function (l) { return l.trim(); }).filter(Boolean);
+    var intro = [], named = [], secs = [], cur = null;
+    lines.forEach(function (l) {
+      var num = l.match(/^\d+\.\s+(.*)$/), t = num ? num[1] : l, m;
+      if (!num && /^\*\*[^*]+\*\*$/.test(t)) { cur = { h: bkPlain(t), e: [] }; secs.push(cur); return; }
+      m = t.match(/^\*\*(.+?)\*\*\s*:\s*(.+)$/) || t.match(/^\*\*(.+?):\*\*\s*(.+)$/);
+      if (m) { named.push({ n: bkPlain(m[1]), raw: m[2] }); return; }
+      if (num) { if (!cur) { cur = { h: null, e: [] }; secs.push(cur); } cur.e.push(t); return; }
+      if (!/^Se escribe/i.test(t)) intro.push(t);
+    });
+    var title = q.f.replace(/\s*\(\d[^)]*\)\s*$/, '').trim(), items = [], gintro = '', entries = null, isNamed = false, multi = false;
+    if (named.length >= 2) {
+      isNamed = true; gintro = bkPlain(intro.join(' '));
+      named.forEach(function (x) { items.push(bkItem(x.n, x.raw)); });
+    } else if (secs.length && secs.every(function (x) { return x.e.length >= 2; })) {
+      multi = secs.length > 1;
+      var head = intro.join(' ');
+      secs.forEach(function (x) {
+        var ent = x.e.map(function (e) { return bkPlain(e).replace(/[.\s]+$/, ''); });
+        var d = (!multi && head ? bkPlain(head).replace(/[:\s]+$/, '') + ': ' : '') + ent.join('; ') + '.';
+        var it = { n: x.h || title, d: d, k: ent.slice(0, 8), s: null, cz: ent.map(bkShort).filter(function (z) { return d.toLowerCase().indexOf(z.toLowerCase()) > -1; }).slice(0, 6), note: '' };
+        items.push(it);
+        if (!multi) entries = ent;
+      });
+    } else {
+      var raw = lines.map(function (l) { var n = l.replace(/^\d+\.\s+/, ''); return /[.:;]$/.test(n) ? n : n + ';'; }).join(' ').replace(/;$/, '.');
+      items.push(bkItem(title, raw));
+    }
+    var pos = vs(QSL[q.id - 1]);
+    items.forEach(function (it) { it.s = 'p' + pos; });
+    return { id: 'x' + q.id, n: title, t: title, sl: ['p' + pos], b: q.b, ord: pos, x: true, qid: q.id, qt: q.t, named: isNamed, entries: entries, multi: multi,
+      lq: (q.t === 'lista' || q.t === 'contraste') ? q.q : null, fmtA: q.a, intro: gintro, tip: q.tip || '', note: q.note || '', items: items };
+  }
+  (function () {
+    var extra = BANK.filter(function (q) { return EXAM_QIDS.indexOf(q.id) < 0; }).map(bkGroup);
+    EXG_FULL = EXG_EXAM.concat(extra).sort(function (a, b) { return a.b - b.b || a.ord - b.ord; });
+    extra.forEach(function (g) { g.items.forEach(function (it, ii) { it.g = g; it.id = g.id + '-' + ii; it.ii = ii; }); });
+  })();
+  function exSlLbl(s) { return typeof s === 'string' ? 'Pres. ' + s.slice(1) : 'Diap. ' + s; }
+  function exSlAct(s) { return typeof s === 'string' ? 'data-a="ex-pos-go" data-pos="' + s.slice(1) + '"' : 'data-a="ex-sl-go" data-p="' + s + '"'; }
+
   var EXI = [];
   EXG.forEach(function (g, gi) {
     g.i = gi;
@@ -1947,7 +2092,7 @@ function plain(a) {
 
   /* ---------- Estado ---------- */
   ui.ex = {
-    mode: 'mapa', cover: false, sel: new Set(EXG.map(function (g) { return g.id; })),
+    mode: 'mapa', cover: false, scope: 'exam', sel: new Set(EXG.map(function (g) { return g.id; })), selExam: null, selAll: null,
     fcSetup: { mode: 'due', dir: 'mix' }, fc: null,
     cnSet: 'teorias', cn: null,
     clSet: 'neg', cl: null,
@@ -1960,16 +2105,25 @@ function plain(a) {
 
   /* ---------- Piezas ---------- */
   function exBar() {
-    var e = ui.ex;
-    return '<div class="blocks"><span class="lbl">Temas del examen</span><div class="chips"><button class="chip" data-a="ex-grp-all" aria-pressed="' + (e.sel.size === EXG.length) + '">Todos</button>' +
-      EXG.map(function (g) { return '<button class="chip" data-a="ex-grp" data-g="' + g.id + '" aria-pressed="' + e.sel.has(g.id) + '">' + esc(g.n) + '<small>' + g.items.length + '</small></button>'; }).join('') + '</div></div>';
+    var e = ui.ex, all = e.sel.size === EXG.length;
+    var hint = '<span class="hint">Toca uno para quedarte solo con ese; toca más para sumarlos o quitarlos.</span>';
+    if (e.scope === 'all') {
+      return '<div class="blocks"><span class="lbl">Bloques del temario</span><div class="chips"><button class="chip" data-a="ex-grp-all" aria-pressed="' + all + '">Todos</button>' +
+        BLOCKS.map(function (b) {
+          var gs = EXG.filter(function (g) { return g.b === b.id; }), n = gs.reduce(function (a, g) { return a + g.items.length; }, 0);
+          var on = !all && gs.length > 0 && gs.every(function (g) { return e.sel.has(g.id); });
+          return '<button class="chip' + (n ? '' : ' zero') + '" data-a="ex-blk" data-b="' + b.id + '" aria-pressed="' + on + '">' + b.id + '. ' + esc(b.n) + '<small>' + n + '</small></button>';
+        }).join('') + '</div>' + hint + '</div>';
+    }
+    return '<div class="blocks"><span class="lbl">Temas del examen</span><div class="chips"><button class="chip" data-a="ex-grp-all" aria-pressed="' + all + '">Todos</button>' +
+      EXG.map(function (g) { return '<button class="chip" data-a="ex-grp" data-g="' + g.id + '" aria-pressed="' + (!all && e.sel.has(g.id)) + '">' + esc(g.n) + '<small>' + g.items.length + '</small></button>'; }).join('') + '</div>' + hint + '</div>';
   }
   function exPool() { return EXI.filter(function (it) { return ui.ex.sel.has(it.g.id); }); }
   function exChips(sl) {
-    return '<div class="ex-chips">' + sl.map(function (p) { return '<button class="ex-sl" data-a="ex-sl-go" data-p="' + p + '">Diap. ' + p + '</button>'; }).join('') + '</div>';
+    return '<div class="ex-chips">' + sl.map(function (p) { return '<button class="ex-sl" ' + exSlAct(p) + '>' + exSlLbl(p) + '</button>'; }).join('') + '</div>';
   }
   function exTags(g, s) {
-    return '<div class="tags"><span class="tag">' + esc(g.n) + '</span>' + (s ? '<span class="tag alta">Diap. ' + s + '</span>' : '') + '</div>';
+    return '<div class="tags"><span class="tag">' + esc(g.n) + '</span>' + (s ? '<span class="tag alta">' + exSlLbl(s) + '</span>' : '') + '</div>';
   }
   function exHl(text, keys) {
     var low = text.toLowerCase(), rs = [];
@@ -1988,6 +2142,7 @@ function plain(a) {
     return ws.every(function (w) { return t.indexOf(' ' + w.slice(0, Math.min(w.length, 5))) > -1; });
   }
   function exListHtml(g) {
+    if (g.fmtA) return fmt(g.fmtA);
     return (g.intro ? '<p>' + esc(g.intro) + '</p>' : '') + '<ol>' + g.items.map(function (it) { return '<li><mark>' + esc(it.n) + '</mark>: ' + esc(it.d) + '</li>'; }).join('') + '</ol>';
   }
   function exExtras(g, it) {
@@ -1998,9 +2153,10 @@ function plain(a) {
   /* ---------- Vista principal ---------- */
   var EXMODES = [['mapa', 'Mapa'], ['tarjetas', 'Tarjetas'], ['conectar', 'Conectar'], ['clasificar', 'Clasificar'], ['quees', 'Di qué es'], ['huecos', 'Huecos'], ['ordenar', 'Ordenar'], ['procesos', 'Procesos'], ['quiz', 'Quiz'], ['slides', 'Diapositivas']];
   function vExamen() {
-    var e = ui.ex, body = EXV[e.mode]();
-    return '<div class="vh"><h2>Examen</h2><p>Solo lo de las diapositivas 5, 8, 14, 15, 19, 20, 21, 27, 29, 35 a 44, 50, 53 y 68.</p></div>' +
-      '<div style="margin-top:12px">' + seg('ex-mode', e.mode, EXMODES) + '</div>' + body;
+    var e = ui.ex, body = EXV[e.mode](), all = e.scope === 'all';
+    return '<div class="vh"><h2>' + (all ? 'Todo el temario' : 'Examen') + '</h2><p>' + (all ? 'Las mismas modalidades, pero con todo el banco: los 7 bloques, no solo lo del examen.' : 'Solo lo de las diapositivas 5, 8, 14, 15, 19, 20, 21, 27, 29, 35 a 44, 50, 53 y 68.') + '</p></div>' +
+      '<div class="field" style="margin-top:12px"><span class="lbl">Contenido</span>' + seg('ex-scope', e.scope, [['exam', 'Solo examen'], ['all', 'Todo el temario']]) + '</div>' +
+      '<div class="field" style="margin-top:12px"><span class="lbl">Modalidad</span>' + seg('ex-mode', e.mode, EXMODES) + '</div>' + body;
   }
 
   /* ---------- Mapa del examen ---------- */
@@ -2017,6 +2173,7 @@ function plain(a) {
   ];
   function exVis(g) {
     var steps;
+    if (g.x) return exVisX(g);
     if (g.id === 'teorias') return [{ k: 'spectrum', t: 'Qué hacer con el conflicto', marks: [['Tradicional', 'Es negativo: hay que evitarlo'], ['Relaciones humanas', 'Es natural e inevitable'], ['Interaccionista', 'Cierto nivel es necesario y positivo']] }];
     if (g.id === 'conclusion') return [{ k: 'flow', t: 'Cómo se convierte en oportunidad', steps: [['Mejorar'], ['Aprender'], ['Innovar'], ['Fortalecer'], ['Alcanzar objetivos']], cap: 'Con comunicación, inteligencia emocional y negociación.' }];
     if (g.id === 'negociacion') return [
@@ -2035,11 +2192,36 @@ function plain(a) {
     return [{ k: 'tiles', t: g.t, items: g.items.map(function (it, i) { return [it.n, it.d, g.letters ? g.letters[i] : '']; }), cap: g.letters ? g.tip : '' }];
   }
   function exConcept(it) {
-    return '<details class="concept ex-det"' + (ui.ex.cover ? '' : ' open') + '><summary><h4>' + esc(it.n) + '</h4><span class="tag alta">Diap. ' + it.s + '</span></summary>' +
+    return '<details class="concept ex-det"' + (ui.ex.cover ? '' : ' open') + '><summary><h4>' + esc(it.n) + '</h4><span class="tag alta">' + exSlLbl(it.s) + '</span></summary>' +
       '<div class="ex-body"><div class="model"><p>' + exHl(it.d, it.k) + '</p></div>' + (it.note ? '<p class="note"><b>Ojo:</b> ' + esc(it.note) + '</p>' : '') + exChips([it.s]) + '</div></details>';
+  }
+  function exSections(gs, byBlock) {
+    var lastB = 0;
+    return gs.map(function (g, i) {
+      var vis = exVis(g).map(function (d) { return '<div class="viz"><h4>' + esc(d.t) + '</h4>' + R[d.k](d) + (d.cap ? '<p class="cap">' + esc(d.cap) + '</p>' : '') + '</div>'; }).join('');
+      var bh = '';
+      if (byBlock && g.b !== lastB) { lastB = g.b; var bb = BLOCKS[g.b - 1]; bh = '<h2 style="margin:28px 0 4px;font-size:var(--fs-l)">Bloque ' + bb.id + ' · ' + esc(bb.n) + '</h2>'; }
+      return bh + '<section class="mblock"><h3><span class="bnum">' + (i + 1) + '</span>' + esc(g.t) + '</h3>' + exChips(g.sl) +
+        (g.intro && g.id !== 'evaluacion' ? '<p>' + esc(g.intro) + '</p>' : '') +
+        (vis ? '<p class="subh">Esquema</p>' + vis : '') + '<p class="subh">Conceptos y definiciones</p>' + g.items.map(exConcept).join('') +
+        (g.note ? '<p class="note"><b>Ojo:</b> ' + esc(g.note) + '</p>' : '') + '</section>';
+    }).join('');
+  }
+  function exVisX(g) {
+    var it = g.items;
+    if (g.entries) return [{ k: 'tiles', t: g.t, items: g.entries.map(function (x) { return [x, '', '']; }) }];
+    if (g.multi) return it.map(function (x) { return { k: 'tiles', t: x.n, items: (x.k || []).map(function (y) { return [y, '', '']; }) }; });
+    if (it.length < 2) return [];
+    if (g.qt === 'contraste') return [{ k: 'compare', t: g.t, cols: it.map(function (x) { return { h: x.n, lead: x.d, items: [] }; }) }];
+    return [{ k: 'tiles', t: g.t, items: it.map(function (x) { return [x.n, x.d, '']; }) }];
+  }
+  function vMapaAll() {
+    var e = ui.ex, gs = EXG.filter(function (g) { return e.sel.has(g.id); });
+    return exBar() + '<div class="ex-tools"><button class="btn ghost sm" data-a="ex-cover" aria-pressed="' + e.cover + '">' + (e.cover ? 'Mostrar las definiciones' : 'Tapar las definiciones (autoprueba)') + '</button><span class="hint">Con las definiciones tapadas, di cada concepto antes de abrirlo.</span></div>' + exSections(gs, true);
   }
   function vMapaEx() {
     var e = ui.ex;
+    if (e.scope === 'all') return vMapaAll();
     var index = '<div class="ex-index">' + EXSL.map(function (s, i) { return '<button class="ex-ix" data-a="ex-sl-go" data-p="' + s[0] + '"><b>' + s[0] + '</b><span>' + esc(s[2]) + '</span></button>'; }).join('') + '</div>';
     var tricks = '<div class="tiles">' + EXTRICKS.map(function (t) { return '<div class="tile"><span class="k">' + esc(t[0]) + '</span><b>' + esc(t[1]) + '</b><span>' + esc(t[2]) + '</span></div>'; }).join('') + '</div>';
     var head = '<div class="mblock"><h3><span class="bnum">★</span>Mapa del examen</h3>' +
@@ -2047,13 +2229,7 @@ function plain(a) {
       '<p class="subh">Índice de diapositivas del examen</p><div class="viz">' + index + '</div>' +
       '<p class="subh">Para recordarlas</p><div class="viz">' + tricks + '</div>' +
       '<div class="ex-tools"><button class="btn ghost sm" data-a="ex-cover" aria-pressed="' + e.cover + '">' + (e.cover ? 'Mostrar las definiciones' : 'Tapar las definiciones (autoprueba)') + '</button><span class="hint">Con las definiciones tapadas, di cada concepto antes de abrirlo.</span></div></div>';
-    var secs = EXG.map(function (g, i) {
-      var vis = exVis(g).map(function (d) { return '<div class="viz"><h4>' + esc(d.t) + '</h4>' + R[d.k](d) + (d.cap ? '<p class="cap">' + esc(d.cap) + '</p>' : '') + '</div>'; }).join('');
-      return '<section class="mblock"><h3><span class="bnum">' + (i + 1) + '</span>' + esc(g.t) + '</h3>' + exChips(g.sl) +
-        (g.intro && g.id !== 'evaluacion' ? '<p>' + esc(g.intro) + '</p>' : '') +
-        '<p class="subh">Esquema</p>' + vis + '<p class="subh">Conceptos y definiciones</p>' + g.items.map(exConcept).join('') +
-        (g.note ? '<p class="note"><b>Ojo:</b> ' + esc(g.note) + '</p>' : '') + '</section>';
-    }).join('');
+    var secs = exSections(EXG, false);
     return head + secs;
   }
 
@@ -2270,7 +2446,7 @@ function plain(a) {
     }
     if (z.i >= z.deck.length) {
       return '<div class="panel"><h3>Terminaste</h3><p>Acertaste ' + z.ok + ' de ' + z.tot + ' huecos.</p>' +
-        (z.bad.length ? '<p class="hint">Para repasar:</p><div class="sheet">' + z.bad.map(function (it) { return '<p>' + esc(it.n) + ' · <button class="ex-sl" data-a="ex-sl-go" data-p="' + it.s + '">Diap. ' + it.s + '</button></p>'; }).join('') + '</div>' : '') +
+        (z.bad.length ? '<p class="hint">Para repasar:</p><div class="sheet">' + z.bad.map(function (it) { return '<p>' + esc(it.n) + ' · <button class="ex-sl" ' + exSlAct(it.s) + '>' + exSlLbl(it.s) + '</button></p>'; }).join('') + '</div>' : '') +
         '<div class="row">' + (z.bad.length ? '<button class="btn" data-a="ex-cz-retry">Repetir las que fallé (' + z.bad.length + ')</button>' : '') + '<button class="btn ghost" data-a="ex-cz-new">Nueva ronda</button></div></div>';
     }
     var it = z.deck[z.i], parts = czParts(it), bi = 0, vals = z.vals[it.id] || [];
@@ -2296,7 +2472,7 @@ function plain(a) {
   ];
   function odSteps(id) {
     if (id === 'cadena') return ['Mejorar', 'Aprender', 'Innovar', 'Fortalecer', 'Alcanzar objetivos'];
-    return exGroup(id).items.map(function (it) { return it.n; });
+    var g = exGroup(id); return g.x ? exSteps(g) : g.items.map(function (it) { return it.n; });
   }
   function exOdStart(id) {
     var steps = odSteps(id), idx = steps.map(function (s, i) { return i; }), o;
@@ -2341,7 +2517,7 @@ function plain(a) {
     }
     if (z.i >= z.qs.length) {
       return '<div class="panel"><h3>Terminaste</h3><p>Acertaste ' + z.ok + ' de ' + z.qs.length + '.</p>' +
-        (z.wrong.length ? '<p class="hint">Para repasar:</p><div class="sheet">' + z.wrong.map(function (q) { return '<p>' + esc(q.it.n) + ' · <button class="ex-sl" data-a="ex-sl-go" data-p="' + q.it.s + '">Diap. ' + q.it.s + '</button></p>'; }).join('') + '</div>' : '') +
+        (z.wrong.length ? '<p class="hint">Para repasar:</p><div class="sheet">' + z.wrong.map(function (q) { return '<p>' + esc(q.it.n) + ' · <button class="ex-sl" ' + exSlAct(q.it.s) + '>' + exSlLbl(q.it.s) + '</button></p>'; }).join('') + '</div>' : '') +
         '<div class="row">' + (z.wrong.length ? '<button class="btn" data-a="ex-qz-retry">Repetir las que fallé (' + z.wrong.length + ')</button>' : '') + '<button class="btn ghost" data-a="ex-qz-new">Nueva ronda</button></div></div>';
     }
     var q = z.qs[z.i], it = q.it, n2d = q.dir === 'n2d';
@@ -2362,6 +2538,7 @@ function plain(a) {
 
   /* ---------- Diapositivas del examen ---------- */
   function vSl() {
+    if (ui.ex.scope === 'all') return '<div class="panel"><p>Con «Todo el temario» las diapositivas son las de la presentación completa. Las que aparecen como «Pres. N» en cada concepto te llevan directo a ella.</p><div class="row"><button class="btn pri" data-a="ex-sl-full-all">Abrir la presentación completa</button></div></div>';
     var i = ui.ex.sl, s = EXSL[i];
     var thumbs = EXSL.map(function (x, k) { return '<button class="th' + (k === i ? ' on' : '') + '" data-a="ex-sl-set" data-i="' + k + '" aria-label="Diapositiva ' + x[0] + '"><img loading="lazy" src="' + slideSrc(x[1]) + '" alt=""><span>' + x[0] + '</span></button>'; }).join('');
     return '<div class="stage" id="stage" style="margin-top:14px"><img id="ex-slide-img" src="' + slideSrc(s[1]) + '" alt="Diapositiva ' + s[0] + ': ' + esc(s[2]) + '"></div>' +
@@ -2486,20 +2663,76 @@ function plain(a) {
     if (e.target.dataset && e.target.dataset.ch === 'ex-pr-hint' && ui.ex.pr) { ui.ex.pr.hint = e.target.checked; render(); }
   });
 
+  /* ---------- Todo el temario: conjuntos extra (conectar, clasificar, ordenar, procesos) ---------- */
+  function exSteps(g) { return g.entries || (g.named ? g.items.map(function (it) { return it.n; }) : []); }
+  var CNS_EXAM = CNS.slice(), CLSETS_EXAM = CLSETS.slice(), ODS_EXAM = ODS.slice(), PRL_EXAM = PRL.slice();
+  var CNS_X = [], ODS_X = [], CLSETS_X = [], PRL_X = [];
+  EXG_FULL.forEach(function (g) {
+    if (!g.x) return;
+    if (g.named && g.items.length >= 3) CNS_X.push([g.id, g.n + ' (' + g.items.length + ')']);
+    var st = exSteps(g);
+    if (g.qt === 'lista' && st.length >= 3 && !g.multi) ODS_X.push([g.id, g.n, 'Pres. ' + g.sl[0].slice(1)]);
+  });
+  Object.assign(CLS, {
+    funcdis: { t: 'Conflicto funcional o disfuncional', cats: ['Funcional', 'Disfuncional'], st: [
+      ['Permite expresar opiniones', 0], ['Estimula la creatividad', 0], ['Favorece el pensamiento crítico', 0], ['Permite aprender de otras perspectivas', 0], ['Puede generar nuevas ideas', 0], ['Ayuda a mejorar las decisiones', 0], ['Ayuda a identificar problemas', 0],
+      ['Estrés', 1], ['Frustración', 1], ['Menor productividad', 1], ['Deterioro del ambiente laboral', 1], ['Genera tensión', 1], ['Afecta las relaciones', 1], ['Dificulta alcanzar los objetivos', 1]] },
+    coachment: { t: 'Coaching o mentoring', cats: ['Coaching', 'Mentoring'], st: [
+      ['Acompañamiento para identificar objetivos', 0], ['Mejora el desempeño y ayuda a superar dificultades', 0], ['Usa preguntas, reflexión y orientación', 0], ['La persona descubre sus propias soluciones', 0],
+      ['Una persona con mayor experiencia o conocimientos orienta a otra', 1], ['Comparte consejos, experiencias y conocimientos', 1], ['Ayuda en el desarrollo de la otra persona', 1]] },
+    carrsuc: { t: 'Planes de carrera o sucesión', cats: ['Planes de carrera', 'Sucesión'], st: [
+      ['Estrategias para establecer cómo crece un empleado dentro de la empresa', 0], ['Ruta diseñada de forma estratégica', 0], ['Alinea el crecimiento profesional con los objetivos de la organización', 0],
+      ['Prepara empleados para ocupar puestos cuando el titular se retire', 1], ['Cubre el puesto si el titular es promovido o deja la empresa', 1], ['Identifica empleados con potencial', 1], ['Prepara para puestos de mayor responsabilidad', 1], ['Cubre la sucesión de puestos importantes', 1]] },
+    benef: { t: 'Beneficios de la capacitación: ¿para quién?', cats: ['Para los empleados', 'Para la empresa'], st: [
+      ['Mayor seguridad en su puesto', 0], ['Mayor confianza en su puesto de trabajo', 0], ['Aumenta la productividad', 1], ['Aumenta la eficiencia', 1], ['Aumenta la calidad del trabajo', 1]] },
+    imp: { t: 'Importancia de la capacitación', cats: ['Adaptabilidad', 'Competitividad', 'Retención de talento'], st: [
+      ['Permite una mejor recepción al momento de hacer un cambio', 0], ['Aumenta la calidad del trabajo solicitado', 1], ['Provoca una diferencia con la competencia', 1],
+      ['Disminuye la rotación de personal', 2], ['Demuestra interés genuino en el crecimiento de los trabajadores', 2]] }
+  });
+  CLSETS_X = [['funcdis', 'Funcional vs disfuncional'], ['coachment', 'Coaching vs mentoring'], ['carrsuc', 'Carrera vs sucesión'], ['benef', 'Beneficios: empleados vs empresa'], ['imp', 'Importancia (3 razones)']];
+  ['tipoconf:2:Tipos de conflicto', 'negoc:20:Elementos de la negociación', 'comp:14:Competencias emocionales'].forEach(function (x) {
+    var p = x.split(':'), g = EXG_FULL.filter(function (y) { return y.id === 'x' + p[1]; })[0];
+    if (g && exSteps(g).length >= 3) PRL_X.push({ id: p[0], t: p[2], sl: 'Pres. ' + g.sl[0].slice(1), steps: exSteps(g) });
+  });
+  ui.ex.selExam = ui.ex.sel; ui.ex.selAll = new Set(EXG_FULL.map(function (g) { return g.id; }));
+  function exSetArr(arr, vals) { arr.length = 0; vals.forEach(function (v) { arr.push(v); }); }
+  function exSetScope(sc) {
+    var e = ui.ex; e.scope = sc;
+    exSetArr(EXG, sc === 'all' ? EXG_FULL : EXG_EXAM);
+    EXG.forEach(function (g, i) { g.i = i; });
+    EXI.length = 0; EXG.forEach(function (g) { g.items.forEach(function (it) { EXI.push(it); }); });
+    e.sel = sc === 'all' ? e.selAll : e.selExam;
+    var mix = CNS_EXAM[CNS_EXAM.length - 1];
+    exSetArr(CNS, sc === 'all' ? CNS_EXAM.slice(0, -1).concat(CNS_X, [mix]) : CNS_EXAM);
+    exSetArr(CLSETS, sc === 'all' ? CLSETS_EXAM.concat(CLSETS_X) : CLSETS_EXAM);
+    exSetArr(ODS, sc === 'all' ? ODS_EXAM.concat(ODS_X) : ODS_EXAM);
+    exSetArr(PRL, sc === 'all' ? PRL_EXAM.concat(PRL_X) : PRL_EXAM);
+    e.fc = e.cn = e.cl = e.rc = e.cz = e.od = e.qz = e.pr = null; e.sl = 0;
+    e.cnSet = 'teorias'; e.clSet = 'neg'; e.odSet = 'recomendaciones';
+  }
+
   var EXV = { procesos: vPr, mapa: vMapaEx, tarjetas: vFc, conectar: vCn, clasificar: vCl, quees: vRc, huecos: vCz, ordenar: vOd, quiz: vQz, slides: vSl };
   VIEWS.examen = vExamen;
   if (location.hash.slice(1) === 'examen') ui.tab = 'examen';
 
   /* ---------- Acciones ---------- */
+  function exToggle(ids) {
+    var s = ui.ex.sel, all = s.size === EXG.length;
+    if (!ids.length) return;
+    if (all) { s.clear(); ids.forEach(function (x) { s.add(x); }); }
+    else if (ids.every(function (x) { return s.has(x); })) { ids.forEach(function (x) { s.delete(x); }); if (!s.size) EXG.forEach(function (x) { s.add(x.id); }); }
+    else ids.forEach(function (x) { s.add(x); });
+    render();
+  }
   function exMove(arr, p, d) { var q = p + d; if (q < 0 || q >= arr.length) return; var t = arr[p]; arr[p] = arr[q]; arr[q] = t; }
   Object.assign(H, {
     'ex-mode': function (el) { ui.ex.mode = el.dataset.v; render(); window.scrollTo(0, 0); },
-    'ex-grp': function (el) {
-      var g = el.dataset.g, s = ui.ex.sel;
-      if (s.has(g)) { s.delete(g); if (!s.size) EXG.forEach(function (x) { s.add(x.id); }); } else s.add(g);
-      render();
-    },
-    'ex-grp-all': function () { EXG.forEach(function (x) { ui.ex.sel.add(x.id); }); render(); },
+    'ex-grp': function (el) { exToggle([el.dataset.g]); },
+    'ex-blk': function (el) { exToggle(EXG.filter(function (g) { return g.b === +el.dataset.b; }).map(function (g) { return g.id; })); },
+    'ex-grp-all': function () { ui.ex.sel.clear(); EXG.forEach(function (x) { ui.ex.sel.add(x.id); }); render(); },
+    'ex-scope': function (el) { exSetScope(el.dataset.v); render(); window.scrollTo(0, 0); },
+    'ex-pos-go': function (el) { ui.slide = +el.dataset.pos; go('presentacion'); },
+    'ex-sl-full-all': function () { go('presentacion'); },
     'ex-cover': function () { ui.ex.cover = !ui.ex.cover; render(); },
     'ex-sl-go': function (el) { ui.ex.sl = exSlIdx(+el.dataset.p); ui.ex.mode = 'slides'; render(); window.scrollTo(0, 0); },
     'ex-sl-set': function (el) { ui.ex.sl = +el.dataset.i; render(); var st = $('#stage'); if (st) st.scrollIntoView({ block: 'nearest', behavior: 'smooth' }); },
